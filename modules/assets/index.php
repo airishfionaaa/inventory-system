@@ -1,60 +1,75 @@
 <?php
 require_once __DIR__ . '/../../includes/header.php';
-$pdo = getDB();
-$stmt = $pdo->query('
-  SELECT a.*, c.name AS category, b.name AS brand
-  FROM assets a
-  JOIN categories c ON a.category_id = c.id
-  JOIN brands b     ON a.brand_id    = b.id
-  ORDER BY a.name
-');
-$assets = $stmt->fetchAll();
+$pdo  = getDB();
+$rows = $pdo->query('
+  SELECT si.*, a.name AS asset_name
+  FROM stock_in si
+  JOIN assets a ON si.asset_id = a.id
+  ORDER BY si.created_at DESC LIMIT 100
+')->fetchAll();
 ?>
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h4 class="fw-bold mb-0">Assets</h4>
-  <a href="create.php" class="btn btn-dark btn-sm">+ Add Asset</a>
+
+<div class="topbar">
+  <div>
+    <div class="topbar-title">Stock-In Records</div>
+    <div class="topbar-sub">Incoming inventory transactions</div>
+  </div>
+  <a href="create.php" class="btn-inv-success"><i class="bi bi-plus-lg"></i> New Stock-In</a>
 </div>
-<div id="asset-live-alert" class="alert alert-success d-none"></div>
-<table class="table table-bordered table-hover">
-  <thead class="table-dark">
-    <tr><th>Name</th><th>SKU</th><th>Category</th><th>Brand</th><th>Stock</th><th>Reorder</th><th>Price</th><th>Location</th><th>Actions</th></tr>
-  </thead>
-  <tbody id="asset-tbody">
-  <?php foreach ($assets as $a): ?>
-    <tr id="asset-row-<?= $a['id'] ?>">
-      <td><?= h($a['name']) ?></td>
-      <td><code><?= h($a['sku']) ?></code></td>
-      <td><?= h($a['category']) ?></td>
-      <td><?= h($a['brand']) ?></td>
-      <td class="asset-stock <?= $a['stock'] <= $a['reorder_qty'] ? 'text-danger fw-bold' : '' ?>"><?= $a['stock'] ?></td>
-      <td><?= $a['reorder_qty'] ?></td>
-      <td>₱<?= number_format($a['unit_price'], 2) ?></td>
-      <td><?= h($a['location'] ?? '') ?></td>
-      <td>
-        <a href="edit.php?id=<?= $a['id'] ?>" class="btn btn-sm btn-outline-secondary">Edit</a>
-        <a href="delete.php?id=<?= $a['id'] ?>" class="btn btn-sm btn-outline-danger"
-           onclick="return confirm('Delete this asset?')">Delete</a>
-      </td>
-    </tr>
-  <?php endforeach; ?>
-  </tbody>
-</table>
+
+<div id="si-live-alert" class="inv-alert success"></div>
+
+<div class="inv-card">
+  <table class="inv-table">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Asset</th>
+        <th>Quantity</th>
+        <th>Unit Cost</th>
+        <th>Supplier</th>
+        <th>Reference</th>
+        <th>Remarks</th>
+      </tr>
+    </thead>
+    <tbody id="si-tbody">
+    <?php foreach ($rows as $r): ?>
+      <tr>
+        <td style="color:#8892b0"><?= h($r['created_at']) ?></td>
+        <td style="font-weight:600"><?= h($r['asset_name']) ?></td>
+        <td style="color:#22c55e;font-weight:700">+<?= $r['quantity'] ?></td>
+        <td>₱<?= number_format($r['unit_cost'], 2) ?></td>
+        <td><?= h($r['supplier'] ?? '—') ?></td>
+        <td><code><?= h($r['reference'] ?? '—') ?></code></td>
+        <td style="color:#8892b0"><?= h($r['remarks'] ?? '—') ?></td>
+      </tr>
+    <?php endforeach; ?>
+    <?php if (empty($rows)): ?>
+      <tr><td colspan="7" style="text-align:center;color:#8892b0;padding:32px">No stock-in records yet</td></tr>
+    <?php endif; ?>
+    </tbody>
+  </table>
+</div>
 
 <script>
 const pusher  = new Pusher(PUSHER_KEY, { cluster: PUSHER_CLUSTER });
 const channel = pusher.subscribe('inventory-channel');
-
-channel.bind('stock-updated', function(data) {
-  const row = document.getElementById('asset-row-' + data.asset_id);
-  if (row) {
-    const cell = row.querySelector('.asset-stock');
-    cell.textContent = data.new_stock;
-    cell.className = 'asset-stock ' + (parseInt(data.new_stock) <= parseInt(data.reorder_qty) ? 'text-danger fw-bold' : '');
-  }
-  const alert = document.getElementById('asset-live-alert');
-  alert.textContent = data.message;
-  alert.classList.remove('d-none');
-  setTimeout(() => alert.classList.add('d-none'), 4000);
+channel.bind('stock-in-recorded', function(data) {
+  const tbody = document.getElementById('si-tbody');
+  const row   = document.createElement('tr');
+  row.innerHTML = `
+    <td style="color:#8892b0">${data.created_at}</td>
+    <td style="font-weight:600">${data.asset_name}</td>
+    <td style="color:#22c55e;font-weight:700">+${data.quantity}</td>
+    <td>₱${parseFloat(data.unit_cost).toFixed(2)}</td>
+    <td>${data.supplier||'—'}</td>
+    <td><code>${data.reference||'—'}</code></td>
+    <td style="color:#8892b0">${data.remarks||'—'}</td>`;
+  tbody.prepend(row);
+  const alert = document.getElementById('si-live-alert');
+  alert.textContent = 'New stock-in recorded: ' + data.asset_name + ' +' + data.quantity;
+  alert.classList.add('show');
+  setTimeout(() => alert.classList.remove('show'), 4000);
 });
 </script>
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>
